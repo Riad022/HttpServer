@@ -1,8 +1,10 @@
 package com.riad.core;
 
+import com.fasterxml.jackson.core.JsonParseException;
 import com.riad.core.io.ReadFileException;
 import com.riad.core.io.WebRootHandler;
 import com.riad.http.*;
+import com.riad.util.Json;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -74,25 +76,130 @@ public class HttpConnectionWorkerThread extends Thread {
     }
 
     private HttpResponse handleRequest(HttpRequest request) {
-
-        switch (request.getMethod()) {
-            case GET:
+        return switch (request.getMethod()) {
+            case GET -> {
                 LOGGER.info(" * GET Request");
-                return handleGetRequest(request, true);
-            case HEAD:
+                yield handleGetRequest(request, true);
+            }
+            case HEAD -> {
                 LOGGER.info(" * HEAD Request");
-                return handleGetRequest(request, false);
-            default:
-                return new HttpResponse.Builder()
-                        .httpVersion(request.getBestCompatibleHttpVersion().LITERAL)
-                        .statusCode(HttpStatusCode.SERVER_ERROR_501_NOT_IMPLEMENTED)
-                        .build();
-        }
+                yield handleGetRequest(request, false);
+            }
+            case POST -> {
+                LOGGER.info(" * POST Request");
+                yield handlePostRequest(request);
+            }
+            case PUT -> {
+                LOGGER.info(" * PUT Request");
+                yield handlePutRequest(request);
+            }
+            case DELETE -> {
+                LOGGER.info(" * DELETE Request");
+                yield handleDeleteRequest(request);
+            }
+            default -> new HttpResponse.Builder()
+                    .httpVersion(request.getBestCompatibleHttpVersion().LITERAL)
+                    .statusCode(HttpStatusCode.SERVER_ERROR_501_NOT_IMPLEMENTED)
+                    .build();
+        };
 
     }
+
+    private HttpResponse handlePostRequest(HttpRequest request) {
+        try {
+            byte[] body = request.getMessageBody();
+            String content = new String(body);
+
+            if (body == null || content.isEmpty() || Json.parse(content).isValueNode()) {
+                return new HttpResponse.Builder()
+                        .httpVersion(request.getBestCompatibleHttpVersion().LITERAL)
+                        .statusCode(HttpStatusCode.CLIENT_ERROR_400_BAD_REQUEST)
+                        .build();
+            }
+
+            return new HttpResponse.Builder()
+                    .httpVersion(request.getBestCompatibleHttpVersion().LITERAL)
+                    .statusCode(HttpStatusCode.OK)
+                    .messageBody(body)
+                    .addHeader(HttpHeaderName.CONTENT_TYPE.headerName, "plain/text")
+                    .build();
+        }catch (JsonParseException e){
+            LOGGER.error("JSON Format incorrect", e);
+            return new HttpResponse.Builder()
+                    .httpVersion(request.getBestCompatibleHttpVersion().LITERAL)
+                    .statusCode(HttpStatusCode.CLIENT_ERROR_400_BAD_REQUEST)
+                    .build();
+        }
+
+        catch(Exception e) {
+            LOGGER.error("Error processing POST request", e);
+            return new HttpResponse.Builder()
+                    .httpVersion(request.getBestCompatibleHttpVersion().LITERAL)
+                    .statusCode(HttpStatusCode.SERVER_ERROR_500_INTERNAL_SERVER_ERROR)
+                    .build();
+        }
+    }
+
+
+    private HttpResponse handlePutRequest(HttpRequest request) {
+        try {
+            byte[] body = request.getMessageBody();
+            String content = new String(body);
+            System.out.println("Test ; " + Json.parse(content).isValueNode());
+            if (body == null || content.isEmpty() || Json.parse(content).isValueNode()) {
+                return new HttpResponse.Builder()
+                        .httpVersion(request.getBestCompatibleHttpVersion().LITERAL)
+                        .statusCode(HttpStatusCode.CLIENT_ERROR_400_BAD_REQUEST)
+                        .build();
+            }
+
+            String target = request.getRequestTarget();
+            LOGGER.info("PUT Target: {}, Body: {}", target, content);
+
+            return new HttpResponse.Builder()
+                    .httpVersion(request.getBestCompatibleHttpVersion().LITERAL)
+                    .statusCode(HttpStatusCode.OK)
+                    .messageBody("Resource updated".getBytes())
+                    .build();
+        }catch (JsonParseException e){
+            LOGGER.error("JSON Format incorrect", e);
+            return new HttpResponse.Builder()
+                    .httpVersion(request.getBestCompatibleHttpVersion().LITERAL)
+                    .statusCode(HttpStatusCode.CLIENT_ERROR_400_BAD_REQUEST)
+                    .build();
+        }
+        catch (Exception e) {
+            LOGGER.error("Error processing PUT request", e);
+            return new HttpResponse.Builder()
+                    .httpVersion(request.getBestCompatibleHttpVersion().LITERAL)
+                    .statusCode(HttpStatusCode.SERVER_ERROR_500_INTERNAL_SERVER_ERROR)
+                    .build();
+        }
+    }
+
+
+    private HttpResponse handleDeleteRequest(HttpRequest request) {
+        try {
+            String target = request.getRequestTarget();
+            LOGGER.info("DELETE Target: {}", target);
+
+            return new HttpResponse.Builder()
+                    .httpVersion(request.getBestCompatibleHttpVersion().LITERAL)
+                    .statusCode(HttpStatusCode.OK)
+                    .messageBody("Resource deleted".getBytes())
+                    .build();
+        } catch (Exception e) {
+            LOGGER.error("Error processing DELETE request", e);
+            return new HttpResponse.Builder()
+                    .httpVersion(request.getBestCompatibleHttpVersion().LITERAL)
+                    .statusCode(HttpStatusCode.SERVER_ERROR_500_INTERNAL_SERVER_ERROR)
+                    .build();
+        }
+    }
+
     private HttpResponse handleGetRequest(HttpRequest request, boolean setMessageBody) {
         try {
-
+            LOGGER.debug("Method GET invoked");
             HttpResponse.Builder builder = new HttpResponse.Builder()
                     .httpVersion(request.getBestCompatibleHttpVersion().LITERAL)
                     .statusCode(HttpStatusCode.OK)

@@ -3,6 +3,7 @@ package com.riad.http;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -130,6 +131,82 @@ public class HttpParser {
         }
     }
 
-    private void parseBody(InputStreamReader reader, HttpRequest request) {
+    private void parseBody(InputStreamReader reader, HttpRequest request) throws IOException, HttpParsingException {
+        // Check if the request has a body (e.g., POST or PUT method)
+        String contentLengthHeader = request.getHeader("Content-Length");
+        if (contentLengthHeader != null) {
+            try {
+                int contentLength = Integer.parseInt(contentLengthHeader);
+                if (contentLength < 0) {
+                    throw new HttpParsingException(HttpStatusCode.CLIENT_ERROR_400_BAD_REQUEST);
+                }
+
+                // Read the body content into a byte array
+                byte[] bodyBuffer = new byte[contentLength];
+                for (int i = 0; i < contentLength; i++) {
+                    int _byte = reader.read();
+                    if (_byte == -1) {
+                        throw new HttpParsingException(HttpStatusCode.CLIENT_ERROR_400_BAD_REQUEST);
+                    }
+                    bodyBuffer[i] = (byte) _byte;
+                }
+
+                request.setMessageBody(bodyBuffer); // Set the body
+            } catch (NumberFormatException e) {
+                throw new HttpParsingException(HttpStatusCode.CLIENT_ERROR_400_BAD_REQUEST);
+            }
+        } else if ("chunked".equalsIgnoreCase(request.getHeader("Transfer-Encoding"))) {
+            // Handle chunked transfer encoding
+            ByteArrayOutputStream bodyBuffer = new ByteArrayOutputStream();
+            StringBuilder chunkSizeBuffer = new StringBuilder();
+
+            int _byte;
+            while ((_byte = reader.read()) >= 0) {
+                if (_byte == CR) {
+                    _byte = reader.read();
+                    if (_byte == LF) {
+                        // End of chunk size or content
+                        if (chunkSizeBuffer.length() == 0) {
+                            // Reached the end of the body
+                            break;
+                        }
+
+                        int chunkSize = Integer.parseInt(chunkSizeBuffer.toString().trim(), 16);
+                        chunkSizeBuffer.delete(0, chunkSizeBuffer.length());
+
+                        if (chunkSize == 0) {
+                            // Final chunk
+                            break;
+                        }
+
+                        // Read the chunk data
+                        for (int i = 0; i < chunkSize; i++) {
+                            int chunkByte = reader.read();
+                            if (chunkByte == -1) {
+                                throw new HttpParsingException(HttpStatusCode.CLIENT_ERROR_400_BAD_REQUEST);
+                            }
+                            bodyBuffer.write(chunkByte);
+                        }
+
+                        // Consume the CRLF after the chunk
+                        _byte = reader.read();
+                        if (_byte != CR) {
+                            throw new HttpParsingException(HttpStatusCode.CLIENT_ERROR_400_BAD_REQUEST);
+                        }
+                        _byte = reader.read();
+                        if (_byte != LF) {
+                            throw new HttpParsingException(HttpStatusCode.CLIENT_ERROR_400_BAD_REQUEST);
+                        }
+                    } else {
+                        chunkSizeBuffer.append((char) _byte);
+                    }
+                } else {
+                    chunkSizeBuffer.append((char) _byte);
+                }
+            }
+
+            request.setMessageBody(bodyBuffer.toByteArray()); // Set the body
+        }
     }
+
 }
